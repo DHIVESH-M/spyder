@@ -1,11 +1,14 @@
 import type { Plugin, ViteDevServer } from 'vite';
 import { loadEnv } from 'vite';
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import type {
+  IncomingMessage,
+  ServerResponse,
+} from 'node:http';
 
 import {
   analyzeImageWithGemini,
   GeminiAnalysisError,
-} from '../api/_lib/geminiAnalyze';
+} from '../api/geminiAnalyze';
 
 /**
  * Read the incoming HTTP request body.
@@ -20,7 +23,6 @@ function readRequestBody(
       let data = '';
       let size = 0;
 
-      // 15 MB request limit
       const MAX_SIZE =
         15 * 1024 * 1024;
 
@@ -49,7 +51,9 @@ function readRequestBody(
 
       req.on(
         'end',
-        () => resolve(data)
+        () => {
+          resolve(data);
+        }
       );
 
       req.on(
@@ -90,23 +94,13 @@ function sendJson(
 /**
  * Vite development API plugin.
  *
- * This creates:
+ * Local development only.
  *
  * POST /api/analyze-image
  *
- * during local development.
+ * Production requests are handled by:
  *
- * IMPORTANT:
- *
- * Vite loads .env values into its own environment,
- * but process.env does not automatically receive them.
- *
- * Our Gemini/Groq server module reads:
- *
- * process.env.GROQ_API_KEY
- *
- * Therefore we explicitly load the .env file and
- * copy GROQ_API_KEY into process.env.
+ * api/analyze-image.ts
  */
 export function geminiDevApiPlugin(): Plugin {
 
@@ -120,7 +114,7 @@ export function geminiDevApiPlugin(): Plugin {
     ) {
 
       // ==========================================
-      // LOAD .ENV FILE
+      // LOAD ENVIRONMENT VARIABLES
       // ==========================================
 
       const env =
@@ -156,7 +150,7 @@ export function geminiDevApiPlugin(): Plugin {
       }
 
       // ==========================================
-      // REGISTER API ROUTE
+      // REGISTER LOCAL API ROUTE
       // ==========================================
 
       server.middlewares.use(
@@ -258,7 +252,7 @@ export function geminiDevApiPlugin(): Plugin {
                 : 'image/jpeg';
 
             // ======================================
-            // DEBUG
+            // DEBUG LOGGING
             // ======================================
 
             console.log(
@@ -278,7 +272,7 @@ export function geminiDevApiPlugin(): Plugin {
             );
 
             // ======================================
-            // CALL AI
+            // CALL GROQ + QWEN VISION
             // ======================================
 
             const result =
