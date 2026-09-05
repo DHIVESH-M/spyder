@@ -1,49 +1,24 @@
 import {
   analyzeImageWithGemini,
   GeminiAnalysisError,
-} from './lib/geminiAnalyze';
-
-/**
- * POST /api/analyze-image
- *
- * The frontend sends:
- *
- * {
- *   image: "<base64>",
- *   mimeType: "image/jpeg"
- * }
- *
- * This server-side route forwards the image to the AI
- * analysis module.
- *
- * NOTE:
- * The function is still named analyzeImageWithGemini()
- * for compatibility with the existing project.
- *
- * The implementation inside geminiAnalyze.ts now uses
- * Groq + Qwen Vision.
- */
+} from './geminiAnalyze';
 
 interface AnalyzeImageBody {
   image?: string;
   mimeType?: string;
 }
 
-interface VercelLikeRequest {
+interface VercelRequest {
   method?: string;
   body?: unknown;
 }
 
-interface VercelLikeResponse {
-  status: (code: number) => VercelLikeResponse;
+interface VercelResponse {
+  status: (code: number) => VercelResponse;
   json: (body: unknown) => void;
   setHeader: (name: string, value: string) => void;
-  end: (body?: string) => void;
 }
 
-/**
- * Safely parse the request body.
- */
 function parseBody(
   body: unknown
 ): AnalyzeImageBody | null {
@@ -52,8 +27,6 @@ function parseBody(
     return null;
   }
 
-  // Vercel / serverless environments can provide
-  // the body either as an object or JSON string.
   if (typeof body === 'string') {
     try {
       const parsed = JSON.parse(body);
@@ -66,24 +39,18 @@ function parseBody(
       }
 
       return null;
-
     } catch {
       return null;
     }
   }
 
-  if (
-    typeof body === 'object'
-  ) {
+  if (typeof body === 'object') {
     return body as AnalyzeImageBody;
   }
 
   return null;
 }
 
-/**
- * Validate base64 image data.
- */
 function isValidBase64Image(
   image: unknown
 ): image is string {
@@ -95,18 +62,9 @@ function isValidBase64Image(
     return false;
   }
 
-  /*
-   * The frontend sends only the base64 portion,
-   * without the data:image/... prefix.
-   */
-  return /^[A-Za-z0-9+/=\s]+$/.test(
-    image
-  );
+  return /^[A-Za-z0-9+/=\s]+$/.test(image);
 }
 
-/**
- * Validate supported image MIME types.
- */
 function isSupportedMimeType(
   mimeType: unknown
 ): boolean {
@@ -125,17 +83,10 @@ function isSupportedMimeType(
   ].includes(mimeType);
 }
 
-/**
- * Main API handler.
- */
 export default async function handler(
-  req: VercelLikeRequest,
-  res: VercelLikeResponse
+  req: VercelRequest,
+  res: VercelResponse
 ) {
-
-  // =============================================
-  // CORS / response headers
-  // =============================================
 
   res.setHeader(
     'Content-Type',
@@ -147,13 +98,11 @@ export default async function handler(
     'no-store'
   );
 
-  // =============================================
-  // METHOD CHECK
-  // =============================================
+  // ==========================================
+  // METHOD
+  // ==========================================
 
-  if (
-    req.method !== 'POST'
-  ) {
+  if (req.method !== 'POST') {
 
     res.status(405).json({
       error:
@@ -163,9 +112,9 @@ export default async function handler(
     return;
   }
 
-  // =============================================
-  // PARSE BODY
-  // =============================================
+  // ==========================================
+  // BODY
+  // ==========================================
 
   const body =
     parseBody(req.body);
@@ -174,15 +123,15 @@ export default async function handler(
 
     res.status(400).json({
       error:
-        'Invalid request body. Expected JSON containing an image.',
+        'Invalid request body.',
     });
 
     return;
   }
 
-  // =============================================
-  // IMAGE CHECK
-  // =============================================
+  // ==========================================
+  // IMAGE
+  // ==========================================
 
   if (
     !isValidBase64Image(body.image)
@@ -196,24 +145,30 @@ export default async function handler(
     return;
   }
 
-  // =============================================
+  // ==========================================
   // MIME TYPE
-  // =============================================
+  // ==========================================
 
   const mimeType =
-    isSupportedMimeType(body.mimeType)
-      ? body.mimeType!
+    isSupportedMimeType(
+      body.mimeType
+    )
+      ? body.mimeType
       : 'image/jpeg';
 
-  // =============================================
-  // IMAGE SIZE CHECK
-  // =============================================
+  // ==========================================
+  // CLEAN BASE64
+  // ==========================================
 
   const base64Image =
     body.image.replace(
       /\s/g,
       ''
     );
+
+  // ==========================================
+  // IMAGE SIZE
+  // ==========================================
 
   const approximateBytes =
     Math.floor(
@@ -236,9 +191,9 @@ export default async function handler(
     return;
   }
 
-  // =============================================
+  // ==========================================
   // AI ANALYSIS
-  // =============================================
+  // ==========================================
 
   try {
 
@@ -247,12 +202,12 @@ export default async function handler(
     );
 
     console.log(
-      '[API] Image MIME type:',
+      '[API] MIME:',
       mimeType
     );
 
     console.log(
-      '[API] Approximate image size:',
+      '[API] Image size:',
       Math.round(
         approximateBytes / 1024
       ),
@@ -265,10 +220,6 @@ export default async function handler(
         mimeType
       );
 
-    // =========================================
-    // SUCCESS
-    // =========================================
-
     console.log(
       '[API] AI analysis successful'
     );
@@ -279,7 +230,7 @@ export default async function handler(
     );
 
     console.log(
-      '[API] Components detected:',
+      '[API] Components:',
       result.components.length
     );
 
@@ -289,16 +240,12 @@ export default async function handler(
 
   } catch (error) {
 
-    // =========================================
-    // KNOWN AI ERROR
-    // =========================================
-
     if (
       error instanceof GeminiAnalysisError
     ) {
 
       console.error(
-        '[API] AI analysis error:',
+        '[API] AI error:',
         error.publicMessage
       );
 
@@ -312,10 +259,6 @@ export default async function handler(
       return;
     }
 
-    // =========================================
-    // UNKNOWN ERROR
-    // =========================================
-
     console.error(
       '[API] Unexpected error:',
       error
@@ -325,7 +268,5 @@ export default async function handler(
       error:
         'Something went wrong while analyzing the image.',
     });
-
-    return;
   }
 }

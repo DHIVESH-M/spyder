@@ -1,5 +1,12 @@
-import type { Plugin, ViteDevServer } from 'vite';
-import { loadEnv } from 'vite';
+import type {
+  Plugin,
+  ViteDevServer,
+} from 'vite';
+
+import {
+  loadEnv,
+} from 'vite';
+
 import type {
   IncomingMessage,
   ServerResponse,
@@ -10,17 +17,24 @@ import {
   GeminiAnalysisError,
 } from '../api/geminiAnalyze';
 
-/**
- * Read the incoming HTTP request body.
+/*
+ * ==========================================
+ * READ REQUEST BODY
+ * ==========================================
  */
+
 function readRequestBody(
   req: IncomingMessage
 ): Promise<string> {
 
   return new Promise(
-    (resolve, reject) => {
+    (
+      resolve,
+      reject
+    ) => {
 
       let data = '';
+
       let size = 0;
 
       const MAX_SIZE =
@@ -28,11 +42,16 @@ function readRequestBody(
 
       req.on(
         'data',
-        (chunk: Buffer) => {
+        (
+          chunk: Buffer
+        ) => {
 
-          size += chunk.length;
+          size +=
+            chunk.length;
 
-          if (size > MAX_SIZE) {
+          if (
+            size > MAX_SIZE
+          ) {
 
             reject(
               new Error(
@@ -45,13 +64,15 @@ function readRequestBody(
             return;
           }
 
-          data += chunk.toString();
+          data +=
+            chunk.toString();
         }
       );
 
       req.on(
         'end',
         () => {
+
           resolve(data);
         }
       );
@@ -64,9 +85,12 @@ function readRequestBody(
   );
 }
 
-/**
- * Send JSON response.
+/*
+ * ==========================================
+ * JSON RESPONSE
+ * ==========================================
  */
+
 function sendJson(
   res: ServerResponse,
   statusCode: number,
@@ -91,17 +115,12 @@ function sendJson(
   );
 }
 
-/**
- * Vite development API plugin.
- *
- * Local development only.
- *
- * POST /api/analyze-image
- *
- * Production requests are handled by:
- *
- * api/analyze-image.ts
+/*
+ * ==========================================
+ * VITE DEVELOPMENT API
+ * ==========================================
  */
+
 export function geminiDevApiPlugin(): Plugin {
 
   return {
@@ -113,9 +132,9 @@ export function geminiDevApiPlugin(): Plugin {
       server: ViteDevServer
     ) {
 
-      // ==========================================
-      // LOAD ENVIRONMENT VARIABLES
-      // ==========================================
+      // ========================================
+      // LOAD .ENV
+      // ========================================
 
       const env =
         loadEnv(
@@ -124,11 +143,13 @@ export function geminiDevApiPlugin(): Plugin {
           ''
         );
 
-      // ==========================================
-      // LOAD GROQ API KEY
-      // ==========================================
+      // ========================================
+      // GROQ API KEY
+      // ========================================
 
-      if (env.GROQ_API_KEY) {
+      if (
+        env.GROQ_API_KEY
+      ) {
 
         process.env.GROQ_API_KEY =
           env.GROQ_API_KEY;
@@ -140,18 +161,13 @@ export function geminiDevApiPlugin(): Plugin {
       } else {
 
         console.error(
-          '[AI] GROQ_API_KEY was NOT found in .env'
-        );
-
-        console.error(
-          '[AI] Expected .env location:',
-          server.config.root
+          '[AI] GROQ_API_KEY was NOT found.'
         );
       }
 
-      // ==========================================
-      // REGISTER LOCAL API ROUTE
-      // ==========================================
+      // ========================================
+      // API ROUTE
+      // ========================================
 
       server.middlewares.use(
         '/api/analyze-image',
@@ -160,9 +176,9 @@ export function geminiDevApiPlugin(): Plugin {
           res
         ) => {
 
-          // ========================================
-          // METHOD CHECK
-          // ========================================
+          // ====================================
+          // METHOD
+          // ====================================
 
           if (
             req.method !== 'POST'
@@ -180,20 +196,16 @@ export function geminiDevApiPlugin(): Plugin {
             return;
           }
 
-          // ========================================
-          // REQUEST BODY
-          // ========================================
-
           try {
+
+            // ==================================
+            // BODY
+            // ==================================
 
             const rawBody =
               await readRequestBody(
                 req
               );
-
-            // ======================================
-            // PARSE JSON
-            // ======================================
 
             let parsed: {
               image?: string;
@@ -221,9 +233,9 @@ export function geminiDevApiPlugin(): Plugin {
               return;
             }
 
-            // ======================================
-            // IMAGE VALIDATION
-            // ======================================
+            // ==================================
+            // IMAGE
+            // ==================================
 
             if (
               !parsed.image ||
@@ -242,18 +254,18 @@ export function geminiDevApiPlugin(): Plugin {
               return;
             }
 
-            // ======================================
-            // MIME TYPE
-            // ======================================
+            // ==================================
+            // MIME
+            // ==================================
 
             const mimeType =
               typeof parsed.mimeType === 'string'
                 ? parsed.mimeType
                 : 'image/jpeg';
 
-            // ======================================
-            // DEBUG LOGGING
-            // ======================================
+            // ==================================
+            // LOG
+            // ==================================
 
             console.log(
               '[AI] Image analysis request received.'
@@ -271,9 +283,9 @@ export function geminiDevApiPlugin(): Plugin {
               )
             );
 
-            // ======================================
-            // CALL GROQ + QWEN VISION
-            // ======================================
+            // ==================================
+            // AI
+            // ==================================
 
             const result =
               await analyzeImageWithGemini(
@@ -281,22 +293,12 @@ export function geminiDevApiPlugin(): Plugin {
                 mimeType
               );
 
-            // ======================================
+            // ==================================
             // SUCCESS
-            // ======================================
+            // ==================================
 
             console.log(
               '[AI] Analysis successful.'
-            );
-
-            console.log(
-              '[AI] Device:',
-              result.device
-            );
-
-            console.log(
-              '[AI] Components:',
-              result.components.length
             );
 
             sendJson(
@@ -305,40 +307,40 @@ export function geminiDevApiPlugin(): Plugin {
               result
             );
 
-          } catch (err) {
+          } catch (error) {
 
-            // ======================================
-            // KNOWN AI ERROR
-            // ======================================
+            // ==================================
+            // KNOWN ERROR
+            // ==================================
 
             if (
-              err instanceof GeminiAnalysisError
+              error instanceof GeminiAnalysisError
             ) {
 
               console.error(
                 '[AI] Analysis error:',
-                err.publicMessage
+                error.publicMessage
               );
 
               sendJson(
                 res,
-                err.statusCode,
+                error.statusCode,
                 {
                   error:
-                    err.publicMessage,
+                    error.publicMessage,
                 }
               );
 
               return;
             }
 
-            // ======================================
+            // ==================================
             // UNKNOWN ERROR
-            // ======================================
+            // ==================================
 
             console.error(
-              '[AI] Unexpected API error:',
-              err
+              '[AI] Unexpected error:',
+              error
             );
 
             sendJson(
