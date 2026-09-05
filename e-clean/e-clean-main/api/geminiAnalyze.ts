@@ -379,8 +379,7 @@ function normalizeResult(
   const rawPotential =
     data.recoveryPotential &&
     typeof data.recoveryPotential === 'object'
-      ? data.recoveryPotential
-        as Record<string, unknown>
+      ? (data.recoveryPotential as Record<string, unknown>)
       : {};
 
   return {
@@ -412,8 +411,7 @@ function normalizeResult(
           const rawBox =
             component.box &&
             typeof component.box === 'object'
-              ? component.box
-                as Record<string, unknown>
+              ? (component.box as Record<string, unknown>)
               : {};
 
           const rawMaterials =
