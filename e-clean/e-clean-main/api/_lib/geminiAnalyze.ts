@@ -1,12 +1,27 @@
-import { GoogleGenAI } from '@google/genai';
+import Groq from 'groq-sdk';
 
 /**
- * Server-only Gemini analysis module.
+ * Server-only AI analysis module.
  *
  * IMPORTANT:
- * - Never import this file from src/
- * - GEMINI_API_KEY must stay server-side
- * - Used by the Vite middleware and Vercel API route
+ * - This file must NEVER be imported from src/
+ * - GROQ_API_KEY must remain server-side
+ * - The filename is kept as geminiAnalyze.ts so the existing
+ *   analyze-image.ts file does not need to change.
+ *
+ * AI PROVIDER:
+ * Groq
+ *
+ * MODEL:
+ * qwen/qwen3.6-27b
+ *
+ * Supports:
+ * - Text input
+ * - Image input
+ * - JSON mode
+ * - Vision
+ *
+ * Groq currently lists this model at approximately 500 tokens/sec.
  */
 
 export interface DetectedComponentJSON {
@@ -17,6 +32,7 @@ export interface DetectedComponentJSON {
   recoveryMethod: string;
   recoveryPotential: 'High' | 'Medium' | 'Low' | 'Possible';
   reason: string;
+
   box: {
     x: number;
     y: number;
@@ -41,17 +57,26 @@ export interface RecoveryStepJSON {
 export interface GeminiScanResult {
   device: string;
   confidence: number;
+
   components: DetectedComponentJSON[];
+
   materials: MaterialEntryJSON[];
+
   recoveryWorkflow: RecoveryStepJSON[];
+
   recoveryPotential: {
     score: number;
     componentReuse: number;
     materialRecovery: number;
   };
+
   disclaimer: string;
 }
 
+/**
+ * Keep the existing error class name so that
+ * api/analyze-image.ts does NOT need to change.
+ */
 export class GeminiAnalysisError extends Error {
   statusCode: number;
   publicMessage: string;
@@ -64,7 +89,9 @@ export class GeminiAnalysisError extends Error {
     super(publicMessage);
 
     this.name = 'GeminiAnalysisError';
+
     this.statusCode = statusCode;
+
     this.publicMessage = publicMessage;
 
     if (cause) {
@@ -73,247 +100,37 @@ export class GeminiAnalysisError extends Error {
   }
 }
 
-/*
- * IMPORTANT
+/**
+ * Groq model.
  *
- * The previous model:
- *   gemini-2.5-flash
- *
- * was returning 404 for your account.
- *
- * Current model:
- *   gemini-3.8-flash
+ * qwen/qwen3.6-27b:
+ * - Vision
+ * - Image input
+ * - JSON mode
+ * - Fast inference
  */
-const MODEL_NAME = 'gemini-3.8-flash';
+const MODEL_NAME = 'qwen/qwen3.6-27b';
 
 /**
- * JSON schema returned by Gemini.
- */
-const RESPONSE_SCHEMA = {
-  type: 'object',
-
-  properties: {
-    device: {
-      type: 'string',
-    },
-
-    confidence: {
-      type: 'number',
-    },
-
-    components: {
-      type: 'array',
-
-      items: {
-        type: 'object',
-
-        properties: {
-          id: {
-            type: 'string',
-          },
-
-          name: {
-            type: 'string',
-          },
-
-          confidence: {
-            type: 'number',
-          },
-
-          materials: {
-            type: 'array',
-
-            items: {
-              type: 'string',
-            },
-          },
-
-          recoveryMethod: {
-            type: 'string',
-          },
-
-          recoveryPotential: {
-            type: 'string',
-
-            enum: [
-              'High',
-              'Medium',
-              'Low',
-              'Possible',
-            ],
-          },
-
-          reason: {
-            type: 'string',
-          },
-
-          box: {
-            type: 'object',
-
-            properties: {
-              x: {
-                type: 'number',
-              },
-
-              y: {
-                type: 'number',
-              },
-
-              w: {
-                type: 'number',
-              },
-
-              h: {
-                type: 'number',
-              },
-            },
-
-            required: [
-              'x',
-              'y',
-              'w',
-              'h',
-            ],
-          },
-        },
-
-        required: [
-          'id',
-          'name',
-          'confidence',
-          'materials',
-          'recoveryMethod',
-          'recoveryPotential',
-          'reason',
-          'box',
-        ],
-      },
-    },
-
-    materials: {
-      type: 'array',
-
-      items: {
-        type: 'object',
-
-        properties: {
-          id: {
-            type: 'string',
-          },
-
-          name: {
-            type: 'string',
-          },
-
-          potential: {
-            type: 'string',
-
-            enum: [
-              'High',
-              'Medium',
-              'Low',
-              'Possible',
-            ],
-          },
-
-          note: {
-            type: 'string',
-          },
-        },
-
-        required: [
-          'id',
-          'name',
-          'potential',
-        ],
-      },
-    },
-
-    recoveryWorkflow: {
-      type: 'array',
-
-      items: {
-        type: 'object',
-
-        properties: {
-          step: {
-            type: 'number',
-          },
-
-          title: {
-            type: 'string',
-          },
-
-          detail: {
-            type: 'string',
-          },
-        },
-
-        required: [
-          'step',
-          'title',
-          'detail',
-        ],
-      },
-    },
-
-    recoveryPotential: {
-      type: 'object',
-
-      properties: {
-        score: {
-          type: 'number',
-        },
-
-        componentReuse: {
-          type: 'number',
-        },
-
-        materialRecovery: {
-          type: 'number',
-        },
-      },
-
-      required: [
-        'score',
-        'componentReuse',
-        'materialRecovery',
-      ],
-    },
-
-    disclaimer: {
-      type: 'string',
-    },
-  },
-
-  required: [
-    'device',
-    'confidence',
-    'components',
-    'materials',
-    'recoveryWorkflow',
-    'recoveryPotential',
-    'disclaimer',
-  ],
-} as const;
-
-/**
- * Main AI prompt.
+ * Prompt for electronics / e-waste analysis.
  */
 const PROMPT = `
 You are an expert electronics identification and e-waste recovery analyst.
 
 Analyze the attached photograph carefully.
 
-Your task is to identify electronic devices and components that are
+Your job is to identify electronic devices and components that are
 VISUALLY CONFIRMABLE from the image.
 
 IMPORTANT:
-Do NOT hallucinate components.
-Do NOT assume a component exists simply because it is common on that
-type of board.
 
-Only report components that a careful human inspector can actually see.
+DO NOT hallucinate components.
+
+DO NOT assume that a component exists just because it is common
+on that type of electronic board.
+
+Only report components that a careful human inspector can actually
+see in the supplied image.
 
 ==================================================
 1. DEVICE IDENTIFICATION
@@ -325,32 +142,36 @@ Examples:
 
 - Arduino UNO
 - Raspberry Pi
+- ESP32 board
 - Mobile phone PCB
 - Laptop motherboard
 - Power supply board
 - Circuit board
 - Electronic module
+- Sensor board
 - Unidentified circuit board
 
 If the exact device cannot be determined, use:
 
 "Unidentified circuit board"
 
-Give a confidence score from 0 to 100.
+Provide a confidence score from 0 to 100.
 
 ==================================================
 2. COMPONENT DETECTION
 ==================================================
 
-Identify every clearly visible component.
+Identify clearly visible electronic components.
 
-Possible examples:
+Possible examples include:
 
 - PCB
 - Microcontroller
 - IC
 - USB connector
+- USB port
 - Pin headers
+- Headers
 - LEDs
 - Capacitors
 - Resistors
@@ -368,8 +189,10 @@ Possible examples:
 - Transformers
 - Coils
 - Sockets
+- Relays
+- Sensors
 
-Only include components that are actually visible.
+ONLY include components that are actually visible.
 
 If only 3 components are clearly visible,
 return only those 3.
@@ -377,23 +200,23 @@ return only those 3.
 Do NOT invent components.
 
 ==================================================
-3. CONFIDENCE
+3. COMPONENT CONFIDENCE
 ==================================================
 
-For every component provide:
+For every detected component provide:
 
 confidence: 0-100
 
 This represents how confident you are that the component
-identification is correct from the image.
+identification is correct based ONLY on the image.
 
 ==================================================
 4. BOUNDING BOX
 ==================================================
 
-For every component provide a normalized bounding box.
+For every detected component provide a normalized bounding box.
 
-Coordinates are percentages of the full image.
+Coordinates must be percentages of the full image.
 
 x = left edge
 y = top edge
@@ -405,9 +228,10 @@ All values must be between 0 and 100.
 Constraints:
 
 x + w <= 100
+
 y + h <= 100
 
-The box should tightly surround the visible component.
+The bounding box should tightly surround the visible component.
 
 Example:
 
@@ -417,6 +241,10 @@ Example:
   "w": 15,
   "h": 12
 }
+
+IMPORTANT:
+
+Do not create huge boxes covering unrelated areas.
 
 ==================================================
 5. REUSABILITY
@@ -435,6 +263,8 @@ Look for:
 - Severe scratches
 - Physical deformation
 - Obvious damage
+- Water damage
+- Rust
 
 Allowed values:
 
@@ -445,7 +275,7 @@ Possible
 
 IMPORTANT:
 
-A photograph cannot prove that an electronic component works.
+A photograph cannot prove that an electronic component actually works.
 
 Never claim:
 
@@ -455,7 +285,7 @@ Never claim:
 
 "Guaranteed reusable"
 
-Instead use wording such as:
+Instead use:
 
 "Potentially reusable"
 
@@ -465,7 +295,8 @@ Instead use wording such as:
 6. REASON
 ==================================================
 
-For each component provide a short physical-condition explanation.
+For each component provide a short explanation of the physical
+condition visible in the photograph.
 
 Example:
 
@@ -480,10 +311,11 @@ Provide a practical recovery or reuse method.
 Examples:
 
 - Desolder and electrically test before reuse.
-- Separate copper connector contacts for material recovery.
-- Sort PCB for certified e-waste recycling.
+- Separate copper connector contacts.
+- Remove and sort the PCB.
 - Test USB connector before reuse.
-- Separate damaged components from reusable components.
+- Separate damaged components.
+- Send non-reusable PCB material to certified e-waste recycling.
 
 ==================================================
 8. MATERIALS
@@ -502,14 +334,15 @@ Examples:
 - Fiberglass
 - Solder
 - Gold plating
+- Tin
 
-Do not invent rare materials without reasonable visual/contextual support.
+Do not invent rare materials without reasonable visual or contextual support.
 
 ==================================================
 9. MATERIAL RECOVERY
 ==================================================
 
-Return an overall list of material categories present.
+Return an overall list of material categories present in the device.
 
 For each material provide:
 
@@ -518,7 +351,7 @@ name
 potential
 note
 
-Potential:
+Potential values:
 
 High
 Medium
@@ -533,12 +366,12 @@ Provide 4-6 practical recovery steps.
 
 Example:
 
-1. Inspect the device.
+1. Inspect the device for physical damage.
 2. Remove batteries and hazardous components.
 3. Separate potentially reusable components.
 4. Sort material streams.
 5. Electrically test reusable components.
-6. Send remaining material to certified e-waste recycling.
+6. Send remaining PCB material to certified e-waste recycling.
 
 ==================================================
 11. RECOVERY SCORE
@@ -547,10 +380,12 @@ Example:
 Return:
 
 score: 0-100
+
 componentReuse: 0-100
+
 materialRecovery: 0-100
 
-These are estimates based on visible condition.
+These values are estimates based on visible condition.
 
 ==================================================
 12. DISCLAIMER
@@ -562,10 +397,10 @@ A photograph cannot verify electrical functionality.
 Physical and electrical testing is required before actual reuse.
 
 ==================================================
-13. NO DEVICE CASE
+13. NO ELECTRONIC DEVICE
 ==================================================
 
-If there is no electronic device or component visible:
+If the image does not contain an electronic device or component:
 
 device:
 "No electronic device detected"
@@ -576,23 +411,105 @@ low value
 components:
 []
 
-Return valid JSON.
+materials:
+[]
+
+recoveryWorkflow:
+[]
+
+recoveryPotential:
+{
+  "score": 0,
+  "componentReuse": 0,
+  "materialRecovery": 0
+}
+
+Return a suitable disclaimer.
 
 ==================================================
-FINAL REQUIREMENT
+14. OUTPUT FORMAT
 ==================================================
 
-Return JSON only.
+Return ONLY valid JSON.
 
 Do NOT return markdown.
 
 Do NOT use code fences.
 
-Do NOT add explanations outside JSON.
+Do NOT write explanations outside the JSON.
+
+The JSON must follow this exact structure:
+
+{
+  "device": "Arduino UNO",
+  "confidence": 95,
+
+  "components": [
+    {
+      "id": "microcontroller",
+      "name": "ATmega328P Microcontroller",
+      "confidence": 94,
+      "materials": [
+        "silicon",
+        "plastic",
+        "metal"
+      ],
+      "recoveryMethod": "Desolder and electrically test before reuse.",
+      "recoveryPotential": "High",
+      "reason": "No obvious physical damage is visible, but electrical testing is required.",
+      "box": {
+        "x": 40,
+        "y": 35,
+        "w": 20,
+        "h": 15
+      }
+    }
+  ],
+
+  "materials": [
+    {
+      "id": "copper",
+      "name": "Copper",
+      "potential": "High",
+      "note": "Present in PCB traces and connectors."
+    }
+  ],
+
+  "recoveryWorkflow": [
+    {
+      "step": 1,
+      "title": "Inspect",
+      "detail": "Inspect the board for visible physical damage."
+    },
+    {
+      "step": 2,
+      "title": "Separate",
+      "detail": "Separate potentially reusable components."
+    },
+    {
+      "step": 3,
+      "title": "Test",
+      "detail": "Electrically test components before reuse."
+    },
+    {
+      "step": 4,
+      "title": "Recover",
+      "detail": "Sort materials for appropriate recovery."
+    }
+  ],
+
+  "recoveryPotential": {
+    "score": 80,
+    "componentReuse": 75,
+    "materialRecovery": 85
+  },
+
+  "disclaimer": "A photograph cannot verify electrical functionality. Physical and electrical testing is required before actual reuse."
+}
 `;
 
 /**
- * Remove markdown JSON fences if Gemini returns them.
+ * Remove ```json ... ``` if the model returns code fences.
  */
 function stripCodeFences(text: string): string {
   const trimmed = text.trim();
@@ -601,9 +518,11 @@ function stripCodeFences(text: string): string {
     /^```(?:json)?\s*([\s\S]*?)\s*```$/i
   );
 
-  return fenceMatch
-    ? fenceMatch[1].trim()
-    : trimmed;
+  if (fenceMatch) {
+    return fenceMatch[1].trim();
+  }
+
+  return trimmed;
 }
 
 /**
@@ -623,7 +542,10 @@ function clampPercent(value: unknown): number {
 }
 
 /**
- * Normalize Gemini response.
+ * Normalize Gemini/Groq result.
+ *
+ * This ensures your existing frontend always receives
+ * the expected ScanResult-compatible structure.
  */
 function normalizeResult(
   raw: unknown
@@ -634,7 +556,7 @@ function normalizeResult(
     typeof raw !== 'object'
   ) {
     throw new GeminiAnalysisError(
-      'Gemini returned an unexpected response format.',
+      'AI returned an unexpected response format.',
       502
     );
   }
@@ -857,44 +779,58 @@ function normalizeResult(
 }
 
 /**
- * Analyze captured image using Gemini.
+ * Main analysis function.
+ *
+ * IMPORTANT:
+ * The function name is intentionally kept as
+ * analyzeImageWithGemini().
+ *
+ * This means your existing:
+ *
+ * api/analyze-image.ts
+ *
+ * does NOT need to change.
+ *
+ * Internally, this now uses Groq.
  */
 export async function analyzeImageWithGemini(
   base64Image: string,
   mimeType: string
 ): Promise<GeminiScanResult> {
 
-  // ---------------------------------------------
-  // 1. API KEY
-  // ---------------------------------------------
+  // =============================================
+  // 1. CHECK GROQ API KEY
+  // =============================================
 
   const apiKey =
-    process.env.GEMINI_API_KEY;
+    process.env.GROQ_API_KEY;
 
   if (!apiKey) {
+
     throw new GeminiAnalysisError(
-      'The server is missing GEMINI_API_KEY. Add GEMINI_API_KEY to your .env file and restart the dev server.',
+      'The server is missing GROQ_API_KEY. Add GROQ_API_KEY to your .env file and restart the dev server.',
       500
     );
   }
 
-  // ---------------------------------------------
-  // 2. IMAGE VALIDATION
-  // ---------------------------------------------
+  // =============================================
+  // 2. CHECK IMAGE
+  // =============================================
 
   if (
     !base64Image ||
     typeof base64Image !== 'string'
   ) {
+
     throw new GeminiAnalysisError(
       'No image was provided to analyze.',
       400
     );
   }
 
-  // ---------------------------------------------
-  // 3. MIME TYPE
-  // ---------------------------------------------
+  // =============================================
+  // 3. VALIDATE MIME TYPE
+  // =============================================
 
   const allowedMimeTypes = [
     'image/jpeg',
@@ -909,90 +845,202 @@ export async function analyzeImageWithGemini(
       ? mimeType
       : 'image/jpeg';
 
-  // ---------------------------------------------
+  // =============================================
   // 4. IMAGE SIZE
-  // ---------------------------------------------
+  // =============================================
 
   const approxBytes =
     (base64Image.length * 3) / 4;
 
+  /*
+   * Keep under Groq's documented 20 MB image request
+   * limit. We use 12 MB for safety.
+   */
   const MAX_BYTES =
     12 * 1024 * 1024;
 
   if (approxBytes > MAX_BYTES) {
+
     throw new GeminiAnalysisError(
       'The captured image is too large to analyze. Please try again with a smaller image.',
       413
     );
   }
 
-  // ---------------------------------------------
-  // 5. GEMINI CLIENT
-  // ---------------------------------------------
+  // =============================================
+  // 5. CREATE GROQ CLIENT
+  // =============================================
 
-  const ai =
-    new GoogleGenAI({
+  const groq =
+    new Groq({
       apiKey,
     });
 
-  // ---------------------------------------------
-  // 6. GEMINI REQUEST
-  // ---------------------------------------------
+  // =============================================
+  // 6. CREATE IMAGE DATA URL
+  // =============================================
 
-  let response;
+  const imageDataUrl =
+    `data:${cleanMimeType};base64,${base64Image}`;
+
+  // =============================================
+  // 7. SEND REQUEST TO GROQ
+  // =============================================
 
   try {
 
     console.log(
-      `[Gemini] Starting image analysis with ${MODEL_NAME}...`
+      '=========================================='
     );
 
-    response =
-      await ai.models.generateContent({
+    console.log(
+      '[Groq] Starting image analysis...'
+    );
 
-        model: MODEL_NAME,
+    console.log(
+      '[Groq] Model:',
+      MODEL_NAME
+    );
 
-        contents: [
+    console.log(
+      '[Groq] MIME:',
+      cleanMimeType
+    );
+
+    const completion =
+      await groq.chat.completions.create({
+
+        model:
+          MODEL_NAME,
+
+        messages: [
           {
             role: 'user',
 
-            parts: [
-
+            content: [
               {
-                text: PROMPT,
+                type: 'text',
+
+                text:
+                  PROMPT,
               },
 
               {
-                inlineData: {
-                  mimeType:
-                    cleanMimeType,
+                type: 'image_url',
 
-                  data:
-                    base64Image,
+                image_url: {
+                  url:
+                    imageDataUrl,
                 },
               },
-
             ],
           },
         ],
 
-        config: {
-
-          responseMimeType:
-            'application/json',
-
-          responseJsonSchema:
-            RESPONSE_SCHEMA,
-
-          temperature: 0.1,
+        /*
+         * JSON Object Mode is supported by
+         * Qwen 3.6 Vision.
+         *
+         * We still validate and normalize the
+         * result ourselves below.
+         */
+        response_format: {
+          type: 'json_object',
         },
+
+        /*
+         * Low temperature helps keep component
+         * identification more deterministic.
+         */
+        temperature: 0.2,
+
+        /*
+         * Keep the response reasonably sized.
+         */
+        max_completion_tokens: 5000,
+
+        /*
+         * Disable unnecessary reasoning for
+         * faster visual analysis.
+         */
+        reasoning_effort: 'none',
       });
 
     console.log(
-      '[Gemini] Image analysis completed.'
+      '[Groq] Response received successfully.'
+    );
+
+    // =========================================
+    // 8. GET RESPONSE TEXT
+    // =========================================
+
+    const text =
+      completion.choices?.[0]?.message?.content;
+
+    if (
+      !text ||
+      typeof text !== 'string'
+    ) {
+
+      console.error(
+        '[Groq] Empty response:',
+        completion
+      );
+
+      throw new GeminiAnalysisError(
+        'Groq did not return any analysis for this image.',
+        502
+      );
+    }
+
+    // =========================================
+    // 9. PARSE JSON
+    // =========================================
+
+    let parsed: unknown;
+
+    try {
+
+      const cleanedText =
+        stripCodeFences(text);
+
+      parsed =
+        JSON.parse(cleanedText);
+
+    } catch (parseError) {
+
+      console.error(
+        '[Groq] JSON parsing failed.'
+      );
+
+      console.error(
+        '[Groq] Raw response:',
+        text
+      );
+
+      throw new GeminiAnalysisError(
+        'Groq returned a response that could not be parsed as JSON.',
+        502,
+        parseError
+      );
+    }
+
+    // =========================================
+    // 10. NORMALIZE RESULT
+    // =========================================
+
+    return normalizeResult(
+      parsed
     );
 
   } catch (error) {
+
+    // Already our custom error
+    if (
+      error instanceof GeminiAnalysisError
+    ) {
+      throw error;
+    }
 
     const message =
       error instanceof Error
@@ -1004,26 +1052,21 @@ export async function analyzeImageWithGemini(
     );
 
     console.error(
-      '[Gemini] REQUEST FAILED'
+      '[Groq] API REQUEST FAILED'
     );
 
     console.error(
-      '[Gemini] Model:',
+      '[Groq] Model:',
       MODEL_NAME
     );
 
     console.error(
-      '[Gemini] MIME:',
-      cleanMimeType
-    );
-
-    console.error(
-      '[Gemini] Error:',
+      '[Groq] Error:',
       error
     );
 
     console.error(
-      '[Gemini] Message:',
+      '[Groq] Message:',
       message
     );
 
@@ -1031,160 +1074,101 @@ export async function analyzeImageWithGemini(
       '=========================================='
     );
 
-    // -----------------------------------------
-    // INVALID API KEY
-    // -----------------------------------------
+    // =========================================
+    // AUTHENTICATION ERROR
+    // =========================================
 
     if (
-      /api key not valid/i.test(message) ||
       /invalid.*api key/i.test(message) ||
-      /permission denied/i.test(message) ||
+      /invalid.*authentication/i.test(message) ||
+      /authentication/i.test(message) ||
+      /unauthorized/i.test(message) ||
       /\b401\b/.test(message)
     ) {
 
       throw new GeminiAnalysisError(
-        'The Gemini API key is invalid or does not have permission to use Gemini API.',
+        'The Groq API key is invalid. Check GROQ_API_KEY in your .env file.',
         401,
         error
       );
     }
 
-    // -----------------------------------------
-    // MODEL NOT FOUND
-    // -----------------------------------------
+    // =========================================
+    // RATE LIMIT
+    // =========================================
 
     if (
-      /\b404\b/.test(message) ||
-      /not found/i.test(message) ||
-      /does not exist/i.test(message) ||
-      /model.*not.*found/i.test(message)
-    ) {
-
-      throw new GeminiAnalysisError(
-        `Gemini returned 404 for model "${MODEL_NAME}". Check your Gemini API access and @google/genai version. Original error: ${message}`,
-        404,
-        error
-      );
-    }
-
-    // -----------------------------------------
-    // QUOTA / RATE LIMIT
-    // -----------------------------------------
-
-    if (
-      /quota/i.test(message) ||
       /rate.?limit/i.test(message) ||
-      /resource_exhausted/i.test(message) ||
-      /\b429\b/.test(message)
+      /too many requests/i.test(message) ||
+      /429/i.test(message) ||
+      /quota/i.test(message)
     ) {
 
       throw new GeminiAnalysisError(
-        'Gemini API quota or rate limit was exceeded. Please try again later.',
+        'Groq rate limit or quota was exceeded. Please try again shortly.',
         429,
         error
       );
     }
 
-    // -----------------------------------------
-    // SAFETY
-    // -----------------------------------------
+    // =========================================
+    // MODEL ERROR
+    // =========================================
 
     if (
-      /safety/i.test(message) ||
-      /blocked/i.test(message)
+      /model.*not.*found/i.test(message) ||
+      /model.*does not exist/i.test(message) ||
+      /invalid.*model/i.test(message) ||
+      /\b404\b/.test(message)
     ) {
 
       throw new GeminiAnalysisError(
-        'Gemini could not analyze this image because it was blocked by safety filters.',
-        422,
+        `Groq model "${MODEL_NAME}" was not found or is unavailable. Check the model name and Groq account access.`,
+        404,
         error
       );
     }
 
-    // -----------------------------------------
-    // GENERIC ERROR
-    // -----------------------------------------
-
-    throw new GeminiAnalysisError(
-      `Gemini API request failed: ${message}`,
-      502,
-      error
-    );
-  }
-
-  // ---------------------------------------------
-  // 7. RESPONSE TEXT
-  // ---------------------------------------------
-
-  const text =
-    response?.text;
-
-  if (
-    !text ||
-    typeof text !== 'string'
-  ) {
-
-    console.error(
-      '[Gemini] Empty response:',
-      response
-    );
-
-    throw new GeminiAnalysisError(
-      'Gemini did not return any analysis for this image.',
-      502
-    );
-  }
-
-  // ---------------------------------------------
-  // 8. PARSE JSON
-  // ---------------------------------------------
-
-  let parsed: unknown;
-
-  try {
-
-    const cleanedText =
-      stripCodeFences(text);
-
-    parsed =
-      JSON.parse(cleanedText);
-
-  } catch (error) {
-
-    console.error(
-      '[Gemini] JSON parsing failed.'
-    );
-
-    console.error(
-      '[Gemini] Raw response:',
-      text
-    );
-
-    throw new GeminiAnalysisError(
-      'Gemini returned a response that could not be parsed as JSON.',
-      502,
-      error
-    );
-  }
-
-  // ---------------------------------------------
-  // 9. NORMALIZE RESULT
-  // ---------------------------------------------
-
-  try {
-
-    return normalizeResult(parsed);
-
-  } catch (error) {
+    // =========================================
+    // BAD REQUEST
+    // =========================================
 
     if (
-      error instanceof GeminiAnalysisError
+      /bad request/i.test(message) ||
+      /\b400\b/.test(message)
     ) {
-      throw error;
+
+      throw new GeminiAnalysisError(
+        `Groq rejected the image request. Check the image format or request size. ${message}`,
+        400,
+        error
+      );
     }
 
+    // =========================================
+    // SERVER / TEMPORARY ERROR
+    // =========================================
+
+    if (
+      /\b500\b/.test(message) ||
+      /\b502\b/.test(message) ||
+      /\b503\b/.test(message) ||
+      /service unavailable/i.test(message)
+    ) {
+
+      throw new GeminiAnalysisError(
+        'Groq is temporarily unavailable. Please try scanning again.',
+        503,
+        error
+      );
+    }
+
+    // =========================================
+    // GENERIC ERROR
+    // =========================================
+
     throw new GeminiAnalysisError(
-      'Gemini returned invalid analysis data.',
+      `Groq API request failed: ${message}`,
       502,
       error
     );
