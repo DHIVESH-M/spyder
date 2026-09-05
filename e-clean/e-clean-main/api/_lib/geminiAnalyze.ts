@@ -1,9 +1,12 @@
 import { GoogleGenAI } from '@google/genai';
 
 /**
- * Server-only module. Never import this from `src/` — it reads the
- * secret GEMINI_API_KEY from process.env and must never reach the
- * browser bundle.
+ * Server-only Gemini analysis module.
+ *
+ * IMPORTANT:
+ * - Never import this file from src/
+ * - GEMINI_API_KEY must stay server-side
+ * - Used by the Vite middleware and Vercel API route
  */
 
 export interface DetectedComponentJSON {
@@ -14,7 +17,12 @@ export interface DetectedComponentJSON {
   recoveryMethod: string;
   recoveryPotential: 'High' | 'Medium' | 'Low' | 'Possible';
   reason: string;
-  box: { x: number; y: number; w: number; h: number };
+  box: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  };
 }
 
 export interface MaterialEntryJSON {
@@ -48,51 +56,127 @@ export class GeminiAnalysisError extends Error {
   statusCode: number;
   publicMessage: string;
 
-  constructor(publicMessage: string, statusCode = 500, cause?: unknown) {
+  constructor(
+    publicMessage: string,
+    statusCode = 500,
+    cause?: unknown
+  ) {
     super(publicMessage);
+
     this.name = 'GeminiAnalysisError';
     this.statusCode = statusCode;
     this.publicMessage = publicMessage;
+
     if (cause) {
-      // Keep the original error around for server-side logs only.
       (this as { cause?: unknown }).cause = cause;
     }
   }
 }
 
-const MODEL_NAME = 'gemini-2.5-flash';
+/*
+ * IMPORTANT
+ *
+ * The previous model:
+ *   gemini-2.5-flash
+ *
+ * was returning 404 for your account.
+ *
+ * Current model:
+ *   gemini-3.8-flash
+ */
+const MODEL_NAME = 'gemini-3.8-flash';
 
+/**
+ * JSON schema returned by Gemini.
+ */
 const RESPONSE_SCHEMA = {
   type: 'object',
+
   properties: {
-    device: { type: 'string' },
-    confidence: { type: 'number' },
+    device: {
+      type: 'string',
+    },
+
+    confidence: {
+      type: 'number',
+    },
+
     components: {
       type: 'array',
+
       items: {
         type: 'object',
+
         properties: {
-          id: { type: 'string' },
-          name: { type: 'string' },
-          confidence: { type: 'number' },
-          materials: { type: 'array', items: { type: 'string' } },
-          recoveryMethod: { type: 'string' },
+          id: {
+            type: 'string',
+          },
+
+          name: {
+            type: 'string',
+          },
+
+          confidence: {
+            type: 'number',
+          },
+
+          materials: {
+            type: 'array',
+
+            items: {
+              type: 'string',
+            },
+          },
+
+          recoveryMethod: {
+            type: 'string',
+          },
+
           recoveryPotential: {
             type: 'string',
-            enum: ['High', 'Medium', 'Low', 'Possible'],
+
+            enum: [
+              'High',
+              'Medium',
+              'Low',
+              'Possible',
+            ],
           },
-          reason: { type: 'string' },
+
+          reason: {
+            type: 'string',
+          },
+
           box: {
             type: 'object',
+
             properties: {
-              x: { type: 'number' },
-              y: { type: 'number' },
-              w: { type: 'number' },
-              h: { type: 'number' },
+              x: {
+                type: 'number',
+              },
+
+              y: {
+                type: 'number',
+              },
+
+              w: {
+                type: 'number',
+              },
+
+              h: {
+                type: 'number',
+              },
             },
-            required: ['x', 'y', 'w', 'h'],
+
+            required: [
+              'x',
+              'y',
+              'w',
+              'h',
+            ],
           },
         },
+
         required: [
           'id',
           'name',
@@ -105,45 +189,103 @@ const RESPONSE_SCHEMA = {
         ],
       },
     },
+
     materials: {
       type: 'array',
+
       items: {
         type: 'object',
+
         properties: {
-          id: { type: 'string' },
-          name: { type: 'string' },
+          id: {
+            type: 'string',
+          },
+
+          name: {
+            type: 'string',
+          },
+
           potential: {
             type: 'string',
-            enum: ['High', 'Medium', 'Low', 'Possible'],
+
+            enum: [
+              'High',
+              'Medium',
+              'Low',
+              'Possible',
+            ],
           },
-          note: { type: 'string' },
+
+          note: {
+            type: 'string',
+          },
         },
-        required: ['id', 'name', 'potential'],
+
+        required: [
+          'id',
+          'name',
+          'potential',
+        ],
       },
     },
+
     recoveryWorkflow: {
       type: 'array',
+
       items: {
         type: 'object',
+
         properties: {
-          step: { type: 'number' },
-          title: { type: 'string' },
-          detail: { type: 'string' },
+          step: {
+            type: 'number',
+          },
+
+          title: {
+            type: 'string',
+          },
+
+          detail: {
+            type: 'string',
+          },
         },
-        required: ['step', 'title', 'detail'],
+
+        required: [
+          'step',
+          'title',
+          'detail',
+        ],
       },
     },
+
     recoveryPotential: {
       type: 'object',
+
       properties: {
-        score: { type: 'number' },
-        componentReuse: { type: 'number' },
-        materialRecovery: { type: 'number' },
+        score: {
+          type: 'number',
+        },
+
+        componentReuse: {
+          type: 'number',
+        },
+
+        materialRecovery: {
+          type: 'number',
+        },
       },
-      required: ['score', 'componentReuse', 'materialRecovery'],
+
+      required: [
+        'score',
+        'componentReuse',
+        'materialRecovery',
+      ],
     },
-    disclaimer: { type: 'string' },
+
+    disclaimer: {
+      type: 'string',
+    },
   },
+
   required: [
     'device',
     'confidence',
@@ -155,194 +297,896 @@ const RESPONSE_SCHEMA = {
   ],
 } as const;
 
-const PROMPT = `You are an expert electronics and e-waste recovery analyst.
+/**
+ * Main AI prompt.
+ */
+const PROMPT = `
+You are an expert electronics identification and e-waste recovery analyst.
 
-Look carefully at the attached photograph of an electronic device, board, or component and identify ONLY what is visually confirmable in the image.
+Analyze the attached photograph carefully.
 
-Rules:
-- Identify the overall device/board if you can reasonably tell what it is (e.g. "Arduino UNO", "Mobile phone PCB", "Power supply unit"). If you truly cannot identify the specific device, use a general description (e.g. "Unidentified circuit board").
-- List every clearly visible electronic component you can actually see (e.g. PCB, microcontroller/IC, connectors, headers, LEDs, capacitors, resistors, crystal oscillators, transformers, batteries, cables, screws, heatsinks, switches, etc). Only include components a careful human inspector could point to in the photo.
-- Do NOT invent or hallucinate components that are not visibly present. If very few components are visible, return only those few — do not pad the list.
-- For every component, give a confidence score (0-100) reflecting how certain you are of the identification from the image alone.
-- For every component, give a normalized bounding box as PERCENTAGES of the image width and height, where x = left edge, y = top edge, w = width, h = height (all 0-100, x+w <= 100, y+h <= 100). The box must tightly bound the component as it appears in the actual image provided.
-- For every component, judge potential reusability based ONLY on its visible physical condition (e.g. no visible corrosion, burn marks, cracks, or damage suggests possible reuse). Do not assume functionality.
-- For every component, give a one-sentence "reason" explaining the physical-condition judgment.
-- For every component, give a practical recommended recovery/reuse method.
-- For every component, list plausible visible material categories (e.g. copper, silicon, plastic, ceramic, steel).
-- Provide an overall list of material categories present on the whole board with an aggregate recovery potential and short note.
-- Provide a short numbered recovery workflow (4-6 steps) appropriate to what is shown.
-- Provide an overall recoveryPotential with a 0-100 "score", plus "componentReuse" and "materialRecovery" as percentages.
-- Provide an overall "confidence" (0-100) for the device identification.
-- Provide a "disclaimer" string that clearly states a photograph cannot verify electrical functionality and that physical/electrical testing is required before any actual reuse.
-- If the image does not show any electronic device or component at all, still return valid JSON with an empty "components" array, a "device" value of "No electronic device detected", low confidence, and an appropriate disclaimer explaining nothing was detected.
+Your task is to identify electronic devices and components that are
+VISUALLY CONFIRMABLE from the image.
 
-Respond with JSON only, matching the provided schema exactly. Do not include markdown formatting or commentary outside the JSON.`;
+IMPORTANT:
+Do NOT hallucinate components.
+Do NOT assume a component exists simply because it is common on that
+type of board.
 
+Only report components that a careful human inspector can actually see.
+
+==================================================
+1. DEVICE IDENTIFICATION
+==================================================
+
+Identify the overall electronic device or board.
+
+Examples:
+
+- Arduino UNO
+- Raspberry Pi
+- Mobile phone PCB
+- Laptop motherboard
+- Power supply board
+- Circuit board
+- Electronic module
+- Unidentified circuit board
+
+If the exact device cannot be determined, use:
+
+"Unidentified circuit board"
+
+Give a confidence score from 0 to 100.
+
+==================================================
+2. COMPONENT DETECTION
+==================================================
+
+Identify every clearly visible component.
+
+Possible examples:
+
+- PCB
+- Microcontroller
+- IC
+- USB connector
+- Pin headers
+- LEDs
+- Capacitors
+- Resistors
+- Crystal oscillator
+- Diodes
+- Transistors
+- Voltage regulators
+- Connectors
+- Switches
+- Buttons
+- Batteries
+- Cables
+- Screws
+- Heatsinks
+- Transformers
+- Coils
+- Sockets
+
+Only include components that are actually visible.
+
+If only 3 components are clearly visible,
+return only those 3.
+
+Do NOT invent components.
+
+==================================================
+3. CONFIDENCE
+==================================================
+
+For every component provide:
+
+confidence: 0-100
+
+This represents how confident you are that the component
+identification is correct from the image.
+
+==================================================
+4. BOUNDING BOX
+==================================================
+
+For every component provide a normalized bounding box.
+
+Coordinates are percentages of the full image.
+
+x = left edge
+y = top edge
+w = width
+h = height
+
+All values must be between 0 and 100.
+
+Constraints:
+
+x + w <= 100
+y + h <= 100
+
+The box should tightly surround the visible component.
+
+Example:
+
+{
+  "x": 35,
+  "y": 20,
+  "w": 15,
+  "h": 12
+}
+
+==================================================
+5. REUSABILITY
+==================================================
+
+Estimate potential reuse ONLY from visible physical condition.
+
+Look for:
+
+- Burn marks
+- Cracks
+- Corrosion
+- Broken connectors
+- Melted plastic
+- Missing components
+- Severe scratches
+- Physical deformation
+- Obvious damage
+
+Allowed values:
+
+High
+Medium
+Low
+Possible
+
+IMPORTANT:
+
+A photograph cannot prove that an electronic component works.
+
+Never claim:
+
+"Working"
+
+"Fully functional"
+
+"Guaranteed reusable"
+
+Instead use wording such as:
+
+"Potentially reusable"
+
+"Requires electrical testing"
+
+==================================================
+6. REASON
+==================================================
+
+For each component provide a short physical-condition explanation.
+
+Example:
+
+"No visible corrosion or burn damage; electrical testing is still required."
+
+==================================================
+7. RECOVERY METHOD
+==================================================
+
+Provide a practical recovery or reuse method.
+
+Examples:
+
+- Desolder and electrically test before reuse.
+- Separate copper connector contacts for material recovery.
+- Sort PCB for certified e-waste recycling.
+- Test USB connector before reuse.
+- Separate damaged components from reusable components.
+
+==================================================
+8. MATERIALS
+==================================================
+
+Identify plausible material categories.
+
+Examples:
+
+- Copper
+- Silicon
+- Plastic
+- Ceramic
+- Steel
+- Aluminium
+- Fiberglass
+- Solder
+- Gold plating
+
+Do not invent rare materials without reasonable visual/contextual support.
+
+==================================================
+9. MATERIAL RECOVERY
+==================================================
+
+Return an overall list of material categories present.
+
+For each material provide:
+
+id
+name
+potential
+note
+
+Potential:
+
+High
+Medium
+Low
+Possible
+
+==================================================
+10. RECOVERY WORKFLOW
+==================================================
+
+Provide 4-6 practical recovery steps.
+
+Example:
+
+1. Inspect the device.
+2. Remove batteries and hazardous components.
+3. Separate potentially reusable components.
+4. Sort material streams.
+5. Electrically test reusable components.
+6. Send remaining material to certified e-waste recycling.
+
+==================================================
+11. RECOVERY SCORE
+==================================================
+
+Return:
+
+score: 0-100
+componentReuse: 0-100
+materialRecovery: 0-100
+
+These are estimates based on visible condition.
+
+==================================================
+12. DISCLAIMER
+==================================================
+
+Clearly state:
+
+A photograph cannot verify electrical functionality.
+Physical and electrical testing is required before actual reuse.
+
+==================================================
+13. NO DEVICE CASE
+==================================================
+
+If there is no electronic device or component visible:
+
+device:
+"No electronic device detected"
+
+confidence:
+low value
+
+components:
+[]
+
+Return valid JSON.
+
+==================================================
+FINAL REQUIREMENT
+==================================================
+
+Return JSON only.
+
+Do NOT return markdown.
+
+Do NOT use code fences.
+
+Do NOT add explanations outside JSON.
+`;
+
+/**
+ * Remove markdown JSON fences if Gemini returns them.
+ */
 function stripCodeFences(text: string): string {
   const trimmed = text.trim();
-  const fenceMatch = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-  return fenceMatch ? fenceMatch[1] : trimmed;
+
+  const fenceMatch = trimmed.match(
+    /^```(?:json)?\s*([\s\S]*?)\s*```$/i
+  );
+
+  return fenceMatch
+    ? fenceMatch[1].trim()
+    : trimmed;
 }
 
-function clampPercent(n: unknown): number {
-  const v = typeof n === 'number' && Number.isFinite(n) ? n : 0;
-  return Math.max(0, Math.min(100, v));
+/**
+ * Clamp number to 0-100.
+ */
+function clampPercent(value: unknown): number {
+  const numericValue =
+    typeof value === 'number' &&
+    Number.isFinite(value)
+      ? value
+      : 0;
+
+  return Math.max(
+    0,
+    Math.min(100, numericValue)
+  );
 }
 
-function normalizeResult(raw: unknown): GeminiScanResult {
-  if (!raw || typeof raw !== 'object') {
-    throw new GeminiAnalysisError('Gemini returned an unexpected response format.', 502);
+/**
+ * Normalize Gemini response.
+ */
+function normalizeResult(
+  raw: unknown
+): GeminiScanResult {
+
+  if (
+    !raw ||
+    typeof raw !== 'object'
+  ) {
+    throw new GeminiAnalysisError(
+      'Gemini returned an unexpected response format.',
+      502
+    );
   }
-  const r = raw as Record<string, unknown>;
 
-  const components = Array.isArray(r.components) ? r.components : [];
-  const materials = Array.isArray(r.materials) ? r.materials : [];
-  const recoveryWorkflow = Array.isArray(r.recoveryWorkflow) ? r.recoveryWorkflow : [];
+  const result =
+    raw as Record<string, unknown>;
+
+  const components =
+    Array.isArray(result.components)
+      ? result.components
+      : [];
+
+  const materials =
+    Array.isArray(result.materials)
+      ? result.materials
+      : [];
+
+  const recoveryWorkflow =
+    Array.isArray(result.recoveryWorkflow)
+      ? result.recoveryWorkflow
+      : [];
+
   const recoveryPotentialRaw =
-    r.recoveryPotential && typeof r.recoveryPotential === 'object'
-      ? (r.recoveryPotential as Record<string, unknown>)
+    result.recoveryPotential &&
+    typeof result.recoveryPotential === 'object'
+      ? result.recoveryPotential as Record<string, unknown>
       : {};
 
   return {
-    device: typeof r.device === 'string' && r.device.trim() ? r.device : 'Unidentified device',
-    confidence: clampPercent(r.confidence),
-    components: components.map((c, idx) => {
-      const comp = (c ?? {}) as Record<string, unknown>;
-      const box = (comp.box ?? {}) as Record<string, unknown>;
-      const potential = comp.recoveryPotential;
-      const validPotential =
-        potential === 'High' || potential === 'Medium' || potential === 'Low' || potential === 'Possible'
-          ? potential
-          : 'Possible';
-      return {
-        id: typeof comp.id === 'string' && comp.id ? comp.id : `component-${idx + 1}`,
-        name: typeof comp.name === 'string' && comp.name ? comp.name : `Component ${idx + 1}`,
-        confidence: clampPercent(comp.confidence),
-        materials: Array.isArray(comp.materials) ? comp.materials.filter((m): m is string => typeof m === 'string') : [],
-        recoveryMethod: typeof comp.recoveryMethod === 'string' ? comp.recoveryMethod : 'Inspect and sort manually before recycling.',
-        recoveryPotential: validPotential,
-        reason: typeof comp.reason === 'string' ? comp.reason : 'Visual condition could not be fully assessed.',
-        box: {
-          x: clampPercent(box.x),
-          y: clampPercent(box.y),
-          w: clampPercent(box.w),
-          h: clampPercent(box.h),
-        },
-      };
-    }),
-    materials: materials.map((m, idx) => {
-      const mat = (m ?? {}) as Record<string, unknown>;
-      const potential = mat.potential;
-      const validPotential =
-        potential === 'High' || potential === 'Medium' || potential === 'Low' || potential === 'Possible'
-          ? potential
-          : 'Possible';
-      return {
-        id: typeof mat.id === 'string' && mat.id ? mat.id : `material-${idx + 1}`,
-        name: typeof mat.name === 'string' && mat.name ? mat.name : `Material ${idx + 1}`,
-        potential: validPotential,
-        note: typeof mat.note === 'string' ? mat.note : undefined,
-      };
-    }),
-    recoveryWorkflow: recoveryWorkflow.map((s, idx) => {
-      const step = (s ?? {}) as Record<string, unknown>;
-      return {
-        step: typeof step.step === 'number' ? step.step : idx + 1,
-        title: typeof step.title === 'string' && step.title ? step.title : `Step ${idx + 1}`,
-        detail: typeof step.detail === 'string' ? step.detail : '',
-      };
-    }),
+    device:
+      typeof result.device === 'string' &&
+      result.device.trim()
+        ? result.device.trim()
+        : 'Unidentified device',
+
+    confidence:
+      clampPercent(
+        result.confidence
+      ),
+
+    components:
+      components.map(
+        (component, index) => {
+
+          const comp =
+            component &&
+            typeof component === 'object'
+              ? component as Record<string, unknown>
+              : {};
+
+          const box =
+            comp.box &&
+            typeof comp.box === 'object'
+              ? comp.box as Record<string, unknown>
+              : {};
+
+          const potential =
+            comp.recoveryPotential;
+
+          const validPotential =
+            potential === 'High' ||
+            potential === 'Medium' ||
+            potential === 'Low' ||
+            potential === 'Possible'
+              ? potential
+              : 'Possible';
+
+          const componentMaterials =
+            Array.isArray(comp.materials)
+              ? comp.materials
+              : [];
+
+          return {
+            id:
+              typeof comp.id === 'string' &&
+              comp.id.trim()
+                ? comp.id.trim()
+                : `component-${index + 1}`,
+
+            name:
+              typeof comp.name === 'string' &&
+              comp.name.trim()
+                ? comp.name.trim()
+                : `Component ${index + 1}`,
+
+            confidence:
+              clampPercent(
+                comp.confidence
+              ),
+
+            materials:
+              componentMaterials.filter(
+                (
+                  material
+                ): material is string =>
+                  typeof material === 'string'
+              ),
+
+            recoveryMethod:
+              typeof comp.recoveryMethod === 'string'
+                ? comp.recoveryMethod
+                : 'Inspect and electrically test before reuse.',
+
+            recoveryPotential:
+              validPotential,
+
+            reason:
+              typeof comp.reason === 'string'
+                ? comp.reason
+                : 'Physical condition could not be fully assessed from the image.',
+
+            box: {
+              x: clampPercent(box.x),
+              y: clampPercent(box.y),
+              w: clampPercent(box.w),
+              h: clampPercent(box.h),
+            },
+          };
+        }
+      ),
+
+    materials:
+      materials.map(
+        (material, index) => {
+
+          const mat =
+            material &&
+            typeof material === 'object'
+              ? material as Record<string, unknown>
+              : {};
+
+          const potential =
+            mat.potential;
+
+          const validPotential =
+            potential === 'High' ||
+            potential === 'Medium' ||
+            potential === 'Low' ||
+            potential === 'Possible'
+              ? potential
+              : 'Possible';
+
+          return {
+            id:
+              typeof mat.id === 'string' &&
+              mat.id.trim()
+                ? mat.id.trim()
+                : `material-${index + 1}`,
+
+            name:
+              typeof mat.name === 'string' &&
+              mat.name.trim()
+                ? mat.name.trim()
+                : `Material ${index + 1}`,
+
+            potential:
+              validPotential,
+
+            note:
+              typeof mat.note === 'string'
+                ? mat.note
+                : undefined,
+          };
+        }
+      ),
+
+    recoveryWorkflow:
+      recoveryWorkflow.map(
+        (workflowStep, index) => {
+
+          const step =
+            workflowStep &&
+            typeof workflowStep === 'object'
+              ? workflowStep as Record<string, unknown>
+              : {};
+
+          return {
+            step:
+              typeof step.step === 'number'
+                ? step.step
+                : index + 1,
+
+            title:
+              typeof step.title === 'string' &&
+              step.title.trim()
+                ? step.title.trim()
+                : `Step ${index + 1}`,
+
+            detail:
+              typeof step.detail === 'string'
+                ? step.detail
+                : '',
+          };
+        }
+      ),
+
     recoveryPotential: {
-      score: clampPercent(recoveryPotentialRaw.score),
-      componentReuse: clampPercent(recoveryPotentialRaw.componentReuse),
-      materialRecovery: clampPercent(recoveryPotentialRaw.materialRecovery),
+      score:
+        clampPercent(
+          recoveryPotentialRaw.score
+        ),
+
+      componentReuse:
+        clampPercent(
+          recoveryPotentialRaw.componentReuse
+        ),
+
+      materialRecovery:
+        clampPercent(
+          recoveryPotentialRaw.materialRecovery
+        ),
     },
+
     disclaimer:
-      typeof r.disclaimer === 'string' && r.disclaimer
-        ? r.disclaimer
-        : 'A photograph cannot verify electrical functionality. Physical and electrical testing is required before reusing any component.',
+      typeof result.disclaimer === 'string' &&
+      result.disclaimer.trim()
+        ? result.disclaimer.trim()
+        : 'A photograph cannot verify electrical functionality. Physical and electrical testing is required before actual reuse.',
   };
 }
 
+/**
+ * Analyze captured image using Gemini.
+ */
 export async function analyzeImageWithGemini(
   base64Image: string,
   mimeType: string
 ): Promise<GeminiScanResult> {
-  const apiKey = process.env.GEMINI_API_KEY;
+
+  // ---------------------------------------------
+  // 1. API KEY
+  // ---------------------------------------------
+
+  const apiKey =
+    process.env.GEMINI_API_KEY;
 
   if (!apiKey) {
     throw new GeminiAnalysisError(
-      'The server is missing a GEMINI_API_KEY. Add it to your .env file and restart the dev server.',
+      'The server is missing GEMINI_API_KEY. Add GEMINI_API_KEY to your .env file and restart the dev server.',
       500
     );
   }
 
-  if (!base64Image || typeof base64Image !== 'string') {
-    throw new GeminiAnalysisError('No image was provided to analyze.', 400);
+  // ---------------------------------------------
+  // 2. IMAGE VALIDATION
+  // ---------------------------------------------
+
+  if (
+    !base64Image ||
+    typeof base64Image !== 'string'
+  ) {
+    throw new GeminiAnalysisError(
+      'No image was provided to analyze.',
+      400
+    );
   }
 
-  const cleanMimeType = mimeType && typeof mimeType === 'string' ? mimeType : 'image/jpeg';
-  const approxBytes = (base64Image.length * 3) / 4;
-  const MAX_BYTES = 12 * 1024 * 1024; // 12 MB safety cap
+  // ---------------------------------------------
+  // 3. MIME TYPE
+  // ---------------------------------------------
+
+  const allowedMimeTypes = [
+    'image/jpeg',
+    'image/jpg',
+    'image/png',
+    'image/webp',
+  ];
+
+  const cleanMimeType =
+    typeof mimeType === 'string' &&
+    allowedMimeTypes.includes(mimeType)
+      ? mimeType
+      : 'image/jpeg';
+
+  // ---------------------------------------------
+  // 4. IMAGE SIZE
+  // ---------------------------------------------
+
+  const approxBytes =
+    (base64Image.length * 3) / 4;
+
+  const MAX_BYTES =
+    12 * 1024 * 1024;
+
   if (approxBytes > MAX_BYTES) {
-    throw new GeminiAnalysisError('The captured image is too large to analyze. Please try again.', 413);
+    throw new GeminiAnalysisError(
+      'The captured image is too large to analyze. Please try again with a smaller image.',
+      413
+    );
   }
 
-  const ai = new GoogleGenAI({ apiKey });
+  // ---------------------------------------------
+  // 5. GEMINI CLIENT
+  // ---------------------------------------------
+
+  const ai =
+    new GoogleGenAI({
+      apiKey,
+    });
+
+  // ---------------------------------------------
+  // 6. GEMINI REQUEST
+  // ---------------------------------------------
 
   let response;
+
   try {
-    response = await ai.models.generateContent({
-      model: MODEL_NAME,
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            { text: PROMPT },
-            {
-              inlineData: {
-                mimeType: cleanMimeType,
-                data: base64Image,
+
+    console.log(
+      `[Gemini] Starting image analysis with ${MODEL_NAME}...`
+    );
+
+    response =
+      await ai.models.generateContent({
+
+        model: MODEL_NAME,
+
+        contents: [
+          {
+            role: 'user',
+
+            parts: [
+
+              {
+                text: PROMPT,
               },
-            },
-          ],
+
+              {
+                inlineData: {
+                  mimeType:
+                    cleanMimeType,
+
+                  data:
+                    base64Image,
+                },
+              },
+
+            ],
+          },
+        ],
+
+        config: {
+
+          responseMimeType:
+            'application/json',
+
+          responseJsonSchema:
+            RESPONSE_SCHEMA,
+
+          temperature: 0.1,
         },
-      ],
-      config: {
-        responseMimeType: 'application/json',
-        // Standard (lowercase-typed) JSON Schema — the modern
-        // `responseJsonSchema` field, as opposed to the older
-        // `responseSchema` field which requires the uppercase `Type` enum.
-        responseJsonSchema: RESPONSE_SCHEMA,
-      },
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+      });
 
-    if (/api key not valid|invalid.*api key|permission denied/i.test(message)) {
-      throw new GeminiAnalysisError('The Gemini API key is invalid. Please check your .env file.', 401, err);
+    console.log(
+      '[Gemini] Image analysis completed.'
+    );
+
+  } catch (error) {
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : String(error);
+
+    console.error(
+      '=========================================='
+    );
+
+    console.error(
+      '[Gemini] REQUEST FAILED'
+    );
+
+    console.error(
+      '[Gemini] Model:',
+      MODEL_NAME
+    );
+
+    console.error(
+      '[Gemini] MIME:',
+      cleanMimeType
+    );
+
+    console.error(
+      '[Gemini] Error:',
+      error
+    );
+
+    console.error(
+      '[Gemini] Message:',
+      message
+    );
+
+    console.error(
+      '=========================================='
+    );
+
+    // -----------------------------------------
+    // INVALID API KEY
+    // -----------------------------------------
+
+    if (
+      /api key not valid/i.test(message) ||
+      /invalid.*api key/i.test(message) ||
+      /permission denied/i.test(message) ||
+      /\b401\b/.test(message)
+    ) {
+
+      throw new GeminiAnalysisError(
+        'The Gemini API key is invalid or does not have permission to use Gemini API.',
+        401,
+        error
+      );
     }
-    if (/quota|rate limit|resource_exhausted/i.test(message)) {
-      throw new GeminiAnalysisError('The Gemini API rate limit or quota was exceeded. Please try again shortly.', 429, err);
+
+    // -----------------------------------------
+    // MODEL NOT FOUND
+    // -----------------------------------------
+
+    if (
+      /\b404\b/.test(message) ||
+      /not found/i.test(message) ||
+      /does not exist/i.test(message) ||
+      /model.*not.*found/i.test(message)
+    ) {
+
+      throw new GeminiAnalysisError(
+        `Gemini returned 404 for model "${MODEL_NAME}". Check your Gemini API access and @google/genai version. Original error: ${message}`,
+        404,
+        error
+      );
     }
-    if (/safety|blocked/i.test(message)) {
-      throw new GeminiAnalysisError('The image could not be analyzed because it was flagged by Gemini safety filters.', 422, err);
+
+    // -----------------------------------------
+    // QUOTA / RATE LIMIT
+    // -----------------------------------------
+
+    if (
+      /quota/i.test(message) ||
+      /rate.?limit/i.test(message) ||
+      /resource_exhausted/i.test(message) ||
+      /\b429\b/.test(message)
+    ) {
+
+      throw new GeminiAnalysisError(
+        'Gemini API quota or rate limit was exceeded. Please try again later.',
+        429,
+        error
+      );
     }
-    throw new GeminiAnalysisError('Could not reach the Gemini API. Please try again.', 502, err);
+
+    // -----------------------------------------
+    // SAFETY
+    // -----------------------------------------
+
+    if (
+      /safety/i.test(message) ||
+      /blocked/i.test(message)
+    ) {
+
+      throw new GeminiAnalysisError(
+        'Gemini could not analyze this image because it was blocked by safety filters.',
+        422,
+        error
+      );
+    }
+
+    // -----------------------------------------
+    // GENERIC ERROR
+    // -----------------------------------------
+
+    throw new GeminiAnalysisError(
+      `Gemini API request failed: ${message}`,
+      502,
+      error
+    );
   }
 
-  const text = response.text;
+  // ---------------------------------------------
+  // 7. RESPONSE TEXT
+  // ---------------------------------------------
 
-  if (!text) {
-    throw new GeminiAnalysisError('Gemini did not return any analysis for this image.', 502);
+  const text =
+    response?.text;
+
+  if (
+    !text ||
+    typeof text !== 'string'
+  ) {
+
+    console.error(
+      '[Gemini] Empty response:',
+      response
+    );
+
+    throw new GeminiAnalysisError(
+      'Gemini did not return any analysis for this image.',
+      502
+    );
   }
+
+  // ---------------------------------------------
+  // 8. PARSE JSON
+  // ---------------------------------------------
 
   let parsed: unknown;
+
   try {
-    parsed = JSON.parse(stripCodeFences(text));
-  } catch (err) {
-    throw new GeminiAnalysisError('Gemini returned a response that could not be parsed.', 502, err);
+
+    const cleanedText =
+      stripCodeFences(text);
+
+    parsed =
+      JSON.parse(cleanedText);
+
+  } catch (error) {
+
+    console.error(
+      '[Gemini] JSON parsing failed.'
+    );
+
+    console.error(
+      '[Gemini] Raw response:',
+      text
+    );
+
+    throw new GeminiAnalysisError(
+      'Gemini returned a response that could not be parsed as JSON.',
+      502,
+      error
+    );
   }
 
-  return normalizeResult(parsed);
+  // ---------------------------------------------
+  // 9. NORMALIZE RESULT
+  // ---------------------------------------------
+
+  try {
+
+    return normalizeResult(parsed);
+
+  } catch (error) {
+
+    if (
+      error instanceof GeminiAnalysisError
+    ) {
+      throw error;
+    }
+
+    throw new GeminiAnalysisError(
+      'Gemini returned invalid analysis data.',
+      502,
+      error
+    );
+  }
 }
