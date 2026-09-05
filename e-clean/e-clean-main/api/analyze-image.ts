@@ -1,7 +1,7 @@
 import {
   analyzeImageWithGemini,
   GeminiAnalysisError,
-} from './_lib/geminiAnalyze';
+} from './lib/geminiAnalyze';
 
 /**
  * POST /api/analyze-image
